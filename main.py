@@ -1,66 +1,59 @@
 import os
 import logging
-import requests
 from fastapi import FastAPI, Request
+import httpx
 from dotenv import load_dotenv
 from datetime import datetime
 
-# Load environment variables
 load_dotenv()
 
-DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
-USD_THRESHOLD = float(os.getenv("USD_THRESHOLD", "10000"))
-
 app = FastAPI()
+DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
+USD_THRESHOLD = 10000  # Порог в USD
+
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("main")
+logger = logging.getLogger(__name__)
 
 @app.post("/webhook")
-async def webhook(request: Request):
-    body = await request.json()
-    events = body if isinstance(body, list) else [body]
-
-    for event in events:
-        if not isinstance(event, dict):
-            logger.error(f"[SKIPPED] Unexpected event type: {type(event)} — {event}")
-            continue
-
-        try:
-            token_address = event.get("rawContract", {}).get("address")
-            amount = float(event.get("value", 0))
-            usd_value = float(event.get("valueUsd", 0))
-            from_address = event.get("from")
-            to_address = event.get("to")
-            tx_hash = event.get("hash")
-            direction = "IN" if event.get("to") else "OUT"
-
-            if usd_value < USD_THRESHOLD:
-                logger.info("[INFO] Skipped due to low USD value")
+async def handle_webhook(request: Request):
+    try:
+        payload = await request.json()
+        for event in payload.get("event", []):
+            if not isinstance(event, dict):
+                logger.error("[ERROR] Failed to process event: not a dict")
                 continue
 
-            message = (
-                f"**Whale Alert!**
-"
-                f"**Amount:** `${usd_value:,.0f}`
-"
-                f"**Token:** `{token_address}`
-"
-                f"**Direction:** `{direction}`
-"
-                f"**From:** `{from_address}`
-"
-                f"**To:** `{to_address}`
-"
-                f"**TX Hash:** [View TX](https://etherscan.io/tx/{tx_hash})
-"
-                f"**Time:** {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}"
-            )
+            token_address = event.get("rawContract", {}).get("address")
+            from_address = event.get("from")
+            to_address = event.get("to")
+            direction = "IN" if to_address else "OUT"
+            tx_hash = event.get("hash")
+            timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
 
-            data = {"content": message}
-            response = requests.post(DISCORD_WEBHOOK_URL, json=data)
-            response.raise_for_status()
+            amount_token = int(event.get("value", 0)) / (10 ** event.get("rawContract", {}).get("decimals", 18))
+            usd_value = float(event.get("valueUSD", 0))
 
-        except Exception as e:
-            logger.error(f"[ERROR] Failed to process event: {e}")
+            if usd_value < USD_THRESHOLD:
+                logger.info(f"[INFO] Skipped due to low USD value: ${usd_value}")
+                continue
 
-    return {"status": "ok"}
+            logger.info(f"[DEBUG] Whale TX found: ${usd_value} | Token: {token_address}")
+
+            message = f"""**Whale Alert!**
+Amount: ${usd_value:,.0f}
+Token: `{token_address}`
+Direction: `{direction}`
+From: `{from_address}`
+To: `{to_address}`
+TX Hash: https://etherscan.io/tx/{tx_hash}
+Time: {timestamp}
+"""
+
+            async with httpx.AsyncClient() as client:
+                await client.post(DISCORD_WEBHOOK_URL, json={"content": message})
+
+        return {"status": "ok"}
+
+    except Exception as e:
+        logger.error(f"[ERROR] Failed to process webhook: {e}")
+        return {"status": "error"}
