@@ -1,96 +1,72 @@
 from fastapi import FastAPI, Request
 import requests
-import discord
-import asyncio
 import os
 from datetime import datetime
+from decimal import Decimal
+import logging
 
-DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
-DISCORD_CHANNEL_ID = int(os.getenv("DISCORD_CHANNEL_ID"))
-
-intents = discord.Intents.default()
-client = discord.Client(intents=intents)
 app = FastAPI()
 
-# Получить цену токена через CoinGecko
-def get_token_price_usd(contract_address):
-    try:
-        url = f"https://api.coingecko.com/api/v3/simple/token_price/ethereum?contract_addresses={contract_address}&vs_currencies=usd"
-        response = requests.get(url)
-        data = response.json()
-        return data.get(contract_address.lower(), {}).get("usd", None)
-    except Exception as e:
-        print(f"[ERROR] CoinGecko price fetch failed: {e}")
-        return None
+DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
+MIN_USD_THRESHOLD = 10000  # фильтр на сумму в USD
 
-def resolve_ens(address):
-    return address  # Placeholder, можно интегрировать ENS API
+# Логгирование
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-@app.on_event("startup")
-async def startup_event():
-    asyncio.create_task(client.start(DISCORD_TOKEN))
+
+def format_discord_message(token, amount, usd_value, from_address, to_address, tx_hash, direction, timestamp):
+    etherscan_base = "https://etherscan.io"
+    return (
+        "**Whale Alert!**\n"
+        f"**Token**: `{token}`\n"
+        f"**Amount**: `{amount:,.2f}`\n"
+        f"**Value**: `${usd_value:,.2f}`\n"
+        f"**Direction**: `{direction}`\n"
+        f"**From**: [`{from_address[:6]}...{from_address[-4:]}`]({etherscan_base}/address/{from_address})\n"
+        f"**To**: [`{to_address[:6]}...{to_address[-4:]}`]({etherscan_base}/address/{to_address})\n"
+        f"**TX Hash**: [View TX]({etherscan_base}/tx/{tx_hash})\n"
+        f"**Time**: `{timestamp}` UTC"
+    )
+
 
 @app.post("/webhook")
-async def receive_webhook(request: Request):
+async def webhook(request: Request):
     data = await request.json()
-    logs = data.get("event", {}).get("rawLogs", [])
-    tx_hash = data.get("event", {}).get("transactionHash", "Unknown")
-    timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
 
-    for log in logs:
-        topics = log.get("topics", [])
-        if len(topics) != 3:
-            continue
-        if topics[0].lower() != "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef":
-            continue
-
-        contract = log.get("address")
-        from_address = "0x" + topics[1][-40:]
-        to_address = "0x" + topics[2][-40:]
-        value_hex = log.get("data", "0x0")
-
+    for event in data.get("event", {}).get("activity", []):
         try:
-            value_int = int(value_hex, 16)
-        except:
-            continue
+            usd_value = Decimal(event.get("value", {}).get("value", 0))
+            if usd_value < MIN_USD_THRESHOLD:
+                logger.info("[INFO] Skipped due to low USD value")
+                continue
 
-        price = get_token_price_usd(contract)
-        if price is None:
-            print(f"[INFO] No price for contract {contract}")
-            continue
+            token = event.get("asset", {}).get("contractAddress", "Unknown")
+            amount = Decimal(event.get("value", {}).get("amount", 0))
+            from_address = event.get("fromAddress", "None")
+            to_address = event.get("toAddress", "None")
+            tx_hash = event.get("hash", "None")
+            direction = event.get("category", "None")
+            timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
 
-        amount = value_int / (10 ** 18)
-        amount_usd = amount * price
-        print(f"[DEBUG] Token: {contract}, Amount: {amount}, USD: {amount_usd}")
+            logger.debug(f"[DEBUG] Token: {token}, Amount: {amount}, USD: {usd_value}")
 
-        if amount_usd < 10000:
-            print("[INFO] Skipped due to low USD value")
-            continue
+            message = format_discord_message(
+                token=token,
+                amount=amount,
+                usd_value=usd_value,
+                from_address=from_address,
+                to_address=to_address,
+                tx_hash=tx_hash,
+                direction=direction,
+                timestamp=timestamp,
+            )
 
-        direction = "OUT" if from_address.lower() in data.get("event", {}).get("involvedAddresses", []) else "IN"
+            response = requests.post(DISCORD_WEBHOOK_URL, json={"content": message})
+            if response.status_code != 204:
+                logger.warning(f"[WARNING] Discord responded with status {response.status_code}: {response.text}")
 
-        from_resolved = resolve_ens(from_address)
-        to_resolved = resolve_ens(to_address)
-
-        message = (
-            f"**Whale Alert!**\n"
-            f"Amount: ${amount_usd:,.0f}\n"
-            f"Token: {contract}\n"
-            f"Direction: {direction}\n"
-            f"From: {from_resolved}\n"
-            f"To: {to_resolved}\n"
-            f"TX Hash: https://etherscan.io/tx/{tx_hash}\n"
-            f"Time: {timestamp}"
-        )
-
-        try:
-            channel = await client.fetch_channel(DISCORD_CHANNEL_ID)
-            if channel:
-                await channel.send(message)
-                print("[INFO] Message sent to Discord.")
-            else:
-                print("[WARNING] Channel not found.")
         except Exception as e:
-            print(f"[ERROR] Discord send failed: {e}")
+            logger.error(f"[ERROR] Failed to process event: {e}")
 
     return {"status": "ok"}
