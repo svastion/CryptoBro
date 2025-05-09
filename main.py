@@ -28,9 +28,10 @@ def format_transaction_message(event):
         logs = block.get("logs", [])
 
         if not logs:
-            return ["No transaction logs in this block."]
+            return ["⚠️ **No transaction logs in this block.**"]
 
         messages = []
+
         for log in logs:
             tx = log.get("transaction", {})
             from_address = safe_get(tx, ["from", "address"])
@@ -44,34 +45,39 @@ def format_transaction_message(event):
                 value_eth = 0.0
 
             topics = log.get("topics", [])
-            is_token = topics and topics[0].startswith("0xddf252ad")
+            is_token = topics and topics[0].lower().startswith("0xddf252ad")
 
-            # Фильтруем: если не токен и value == 0, пропускаем
+            # Пропускать нулевые токены и ETH
             if value_eth == 0 and not is_token:
                 continue
 
-            msg = f"**New Transaction**\n"
-            msg += f"Block: `{block_number}`\n"
-            msg += f"Hash: [`{tx_hash}`](https://etherscan.io/tx/{tx_hash})\n"
-            msg += f"From: `{from_address}`\n"
-            msg += f"To: `{to_address}`\n"
-            msg += f"Value: `{value_eth:.6f} ETH`\n"
+            msg = (
+                f"**🚨 New Transaction**\n"
+                f"> **Block:** `{block_number}`\n"
+                f"> **Tx Hash:** [`{tx_hash}`](https://etherscan.io/tx/{tx_hash})\n"
+                f"> **From:** `{from_address}`\n"
+                f"> **To:** `{to_address}`\n"
+                f"> **Value:** `{value_eth:.6f} ETH`\n"
+            )
+
             if is_token:
-                msg += f"Type: **Token Transfer**\n"
-            msg += "----------------------------"
+                msg += f"> **Type:** 🪙 *Token Transfer*\n"
+
+            msg += f"━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
             messages.append(msg)
 
-        return messages or ["No transaction logs in this block."]
+        return messages or ["⚠️ **No non-zero transactions detected.**"]
 
     except Exception as e:
         logging.error(f"[FATAL] Formatting error: {e}")
-        return ["Error parsing transaction."]
+        return ["❌ Error parsing transaction."]
 
 @app.post("/webhook")
 async def webhook_listener(request: Request):
     try:
         payload = await request.json()
-        logging.info(f"Payload received: {json.dumps(payload)[:300]}...")
+        logging.info(f"Payload received: {json.dumps(payload)[:500]}...")
 
         messages = format_transaction_message(payload.get("event", {}).get("data", {}))
 
