@@ -1,80 +1,67 @@
 import os
+import json
 import logging
+import httpx
 from fastapi import FastAPI, Request
 from dotenv import load_dotenv
-from datetime import datetime
-import httpx
 
 load_dotenv()
-
 app = FastAPI()
+
 DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
 
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("main")
 
-TOKEN_SYMBOLS = {
-    "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": "USDC",
-    "0x6b175474e89094c44da98b954eedeac495271d0f": "DAI",
-    "0xdac17f958d2ee523a2206206994597c13d831ec7": "USDT",
-    "0x514910771af9ca656af840dff83e8264ecf986ca": "LINK",
-    "0x0000000000000000000000000000000000000000": "ETH"
-}
-
-@app.post("/")
-async def webhook_listener(request: Request):
+def format_transaction_message(event):
     try:
-        data = await request.json()
-        logs = data.get("block", {}).get("logs", [])
+        block_number = event['block']['number']
+        block_hash = event['block']['hash']
+        timestamp = event['block']['timestamp']
 
-        if not logs:
-            logger.info("[INFO] No logs in event")
-            return {"status": "ignored"}
+        logs = event['block'].get('logs', [])
+        messages = []
 
         for log in logs:
-            try:
-                tx = log.get("transaction", {})
-                token_address = log.get("account", {}).get("address", "unknown")
-                from_address = tx.get("from", {}).get("address", "unknown")
-                to_address = tx.get("to", {}).get("address", "unknown")
-                raw_value_hex = log.get("data", "0x0")
-                raw_value = int(raw_value_hex, 16)
+            tx = log.get("transaction", {})
+            from_address = tx.get("from", {}).get("address", "Unknown")
+            to_address = tx.get("to", {}).get("address", "Unknown")
+            tx_hash = tx.get("hash", "Unknown")
+            value = tx.get("value", "0")
+            topics = log.get("topics", [])
+            token_transfer = len(topics) > 0 and topics[0].startswith("0xddf252ad")
 
-                # Estimate decimals (default to 6 for stablecoins)
-                decimals = 6
-                amount = raw_value / (10 ** decimals)
+            message = f"**New Transaction Detected**\n"
+            message += f"Block: `{block_number}`\n"
+            message += f"Tx Hash: [`{tx_hash}`](https://etherscan.io/tx/{tx_hash})\n"
+            message += f"From: `{from_address}`\n"
+            message += f"To: `{to_address}`\n"
+            message += f"Value: `{int(value, 16) / 1e18:.4f} ETH`\n"
+            if token_transfer:
+                message += f"Detected as **Token Transfer**\n"
+            message += f"---------------------------"
 
-                symbol = TOKEN_SYMBOLS.get(token_address.lower(), "UNKNOWN")
-                tx_hash = tx.get("hash", "unknown")
-                timestamp = data["block"].get("timestamp", 0)
-                time_str = datetime.utcfromtimestamp(int(timestamp)).strftime("%Y-%m-%d %H:%M UTC")
+            messages.append(message)
 
-                embed = {
-                    "embeds": [
-                        {
-                            "title": "ð¨ Whale Alert",
-                            "color": 0x2ecc71,
-                            "fields": [
-                                {"name": "Token", "value": f"{symbol} `{token_address}`", "inline": False},
-                                {"name": "Amount", "value": f"{amount:,.2f}", "inline": True},
-                                {"name": "From", "value": f"`{from_address}`", "inline": False},
-                                {"name": "To", "value": f"`{to_address}`", "inline": False},
-                                {"name": "Transaction", "value": f"[View on Etherscan](https://etherscan.io/tx/{tx_hash})", "inline": False},
-                                {"name": "Time", "value": time_str, "inline": True}
-                            ],
-                            "footer": {"text": "CryptoBro | All Transfers"}
-                        }
-                    ]
-                }
+        return messages
 
-                async with httpx.AsyncClient() as client:
-                    await client.post(DISCORD_WEBHOOK_URL, json=embed)
+    except Exception as e:
+        logging.error(f"Error formatting message: {e}")
+        return ["Error parsing transaction."]
 
-            except Exception as e:
-                logger.error(f"[ERROR] Error processing log entry: {e}")
+@app.post("/webhook")
+async def webhook_listener(request: Request):
+    try:
+        payload = await request.json()
+        logging.info(f"Payload received: {json.dumps(payload)[:300]}...")
+
+        messages = format_transaction_message(payload)
+
+        async with httpx.AsyncClient() as client:
+            for msg in messages:
+                await client.post(DISCORD_WEBHOOK_URL, json={"content": msg})
 
         return {"status": "ok"}
 
     except Exception as e:
-        logger.error(f"[ERROR] Failed to process webhook: {e}")
-        return {"status": "error"}
+        logging.error(f"[ERROR] Failed to process webhook: {e}")
+        return {"status": "error", "details": str(e)}
