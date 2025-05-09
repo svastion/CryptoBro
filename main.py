@@ -46,6 +46,10 @@ def format_transaction_message(event):
             topics = log.get("topics", [])
             is_token = topics and topics[0].startswith("0xddf252ad")
 
+            # Фильтруем: если не токен и value == 0, пропускаем
+            if value_eth == 0 and not is_token:
+                continue
+
             msg = f"**New Transaction**\n"
             msg += f"Block: `{block_number}`\n"
             msg += f"Hash: [`{tx_hash}`](https://etherscan.io/tx/{tx_hash})\n"
@@ -57,7 +61,7 @@ def format_transaction_message(event):
             msg += "----------------------------"
             messages.append(msg)
 
-        return messages
+        return messages or ["No transaction logs in this block."]
 
     except Exception as e:
         logging.error(f"[FATAL] Formatting error: {e}")
