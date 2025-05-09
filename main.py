@@ -14,11 +14,17 @@ logging.basicConfig(level=logging.INFO)
 
 def format_transaction_message(event):
     try:
-        block_number = event['block']['number']
-        block_hash = event['block']['hash']
-        timestamp = event['block']['timestamp']
+        logging.info(f"[DEBUG] Event structure:\n{json.dumps(event, indent=2)}")
 
-        logs = event['block'].get('logs', [])
+        block = event.get("data", {}).get("block")
+        if not block:
+            raise ValueError("No 'block' in payload.")
+
+        block_number = block.get("number")
+        block_hash = block.get("hash")
+        timestamp = block.get("timestamp")
+
+        logs = block.get('logs', [])
         messages = []
 
         for log in logs:
@@ -37,8 +43,8 @@ def format_transaction_message(event):
             message += f"To: `{to_address}`\n"
             message += f"Value: `{int(value, 16) / 1e18:.4f} ETH`\n"
             if token_transfer:
-                message += f"Detected as **Token Transfer**\n"
-            message += f"---------------------------"
+                message += f"**Token Transfer detected**\n"
+            message += "---------------------------"
 
             messages.append(message)
 
@@ -52,7 +58,7 @@ def format_transaction_message(event):
 async def webhook_listener(request: Request):
     try:
         payload = await request.json()
-        logging.info(f"Payload received: {json.dumps(payload)[:300]}...")
+        logging.info(f"Payload received:\n{json.dumps(payload, indent=2)}")
 
         messages = format_transaction_message(payload)
 
