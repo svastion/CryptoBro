@@ -9,7 +9,6 @@ load_dotenv()
 
 app = FastAPI()
 DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
-USD_THRESHOLD = 1
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("main")
@@ -26,8 +25,8 @@ TOKEN_SYMBOLS = {
 async def webhook_listener(request: Request):
     try:
         data = await request.json()
-
         logs = data.get("block", {}).get("logs", [])
+
         if not logs:
             logger.info("[INFO] No logs in event")
             return {"status": "ignored"}
@@ -35,35 +34,35 @@ async def webhook_listener(request: Request):
         for log in logs:
             try:
                 tx = log.get("transaction", {})
-                token_address = tx.get("to", {}).get("address", "unknown")
+                token_address = log.get("account", {}).get("address", "unknown")
                 from_address = tx.get("from", {}).get("address", "unknown")
                 to_address = tx.get("to", {}).get("address", "unknown")
-                value_raw = int(tx.get("value", 0))
-                value = value_raw / 1e6  # For USDC/USDT/DAI 6 decimals
+                raw_value_hex = log.get("data", "0x0")
+                raw_value = int(raw_value_hex, 16)
+
+                # Estimate decimals (default to 6 for stablecoins)
+                decimals = 6
+                amount = raw_value / (10 ** decimals)
+
                 symbol = TOKEN_SYMBOLS.get(token_address.lower(), "UNKNOWN")
                 tx_hash = tx.get("hash", "unknown")
-                timestamp = data["block"].get("timestamp")
-
-                if value < USD_THRESHOLD:
-                    logger.info(f"[INFO] Skipped tx under threshold: ${value}")
-                    continue
-
+                timestamp = data["block"].get("timestamp", 0)
                 time_str = datetime.utcfromtimestamp(int(timestamp)).strftime("%Y-%m-%d %H:%M UTC")
 
                 embed = {
                     "embeds": [
                         {
-                            "title": "ð¨ Whale Alert!",
-                            "color": 0x3498db,
+                            "title": "ð¨ Whale Alert",
+                            "color": 0x2ecc71,
                             "fields": [
-                                {"name": "Amount", "value": f"**${value:,.2f} {symbol}**", "inline": True},
-                                {"name": "Token Address", "value": f"`{token_address}`", "inline": False},
+                                {"name": "Token", "value": f"{symbol} `{token_address}`", "inline": False},
+                                {"name": "Amount", "value": f"{amount:,.2f}", "inline": True},
                                 {"name": "From", "value": f"`{from_address}`", "inline": False},
                                 {"name": "To", "value": f"`{to_address}`", "inline": False},
-                                {"name": "TX", "value": f"[View on Etherscan](https://etherscan.io/tx/{tx_hash})", "inline": False},
+                                {"name": "Transaction", "value": f"[View on Etherscan](https://etherscan.io/tx/{tx_hash})", "inline": False},
                                 {"name": "Time", "value": time_str, "inline": True}
                             ],
-                            "footer": {"text": "CryptoBro | Whale Tracker"}
+                            "footer": {"text": "CryptoBro | All Transfers"}
                         }
                     ]
                 }
