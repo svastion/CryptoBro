@@ -29,6 +29,8 @@ def format_transaction_message(event):
     try:
         block_data = event.get("block", {})
         block_number = block_data.get("number", "Unknown")
+        block_hash = block_data.get("hash", "Unknown")
+        timestamp = block_data.get("timestamp", "Unknown")
         logs = block_data.get("logs", [])
         messages = []
 
@@ -43,35 +45,22 @@ def format_transaction_message(event):
 
             value_eth = int(value_hex, 16) / 1e18
             message = (
-                f"ð¨ **New Transaction**
-"
-                f"**Block:** `{block_number}`
-"
-                f"**Tx Hash:** [`{tx_hash}`](https://etherscan.io/tx/{tx_hash})
-"
-                f"**From:** `{from_address}`
-"
-                f"**To:** `{to_address}`
-"
-                f"**Value:** `{value_eth:.6f} ETH`
-"
+                f"ð¨ **New Transaction**\n"
+                f"**Block:** `{block_number}`\n"
+                f"**Tx Hash:** [`{tx_hash}`](https://etherscan.io/tx/{tx_hash})\n"
+                f"**From:** `{from_address}`\n"
+                f"**To:** `{to_address}`\n"
+                f"**Value:** `{value_eth:.6f} ETH`\n"
             )
             if token_transfer:
-                message += "**Type:** ðª Token Transfer
-"
+                message += "**Type:** ðª Token Transfer\n"
             message += "----------------------------"
             messages.append(message)
 
-        if not messages:
-            txs = [log.get("transaction", {}) for log in logs]
-            if not txs:
-                return ["No logs found, but transaction received."]
-            else:
-                return ["No transaction logs in this block."]
-        return messages
+        return messages if messages else ["No transaction logs in this block."]
     except Exception as e:
         logging.error(f"[ERROR] Formatting message failed: {e}")
-        return ["â Error parsing transaction."]
+        return [f"â Error parsing transaction."]
 
 @app.post("/webhook")
 async def webhook_listener(request: Request):
@@ -88,20 +77,13 @@ async def webhook_listener(request: Request):
                 if tx_hash:
                     details = await fetch_tx_details_from_etherscan(tx_hash)
                     message = (
-                        f"ð **Transaction Info via Etherscan**
-"
-                        f"**Tx Hash:** [`{tx_hash}`](https://etherscan.io/tx/{tx_hash})
-"
-                        f"**From:** `{details.get('from', 'N/A')}`
-"
-                        f"**To:** `{details.get('to', 'N/A')}`
-"
-                        f"**Gas:** `{details.get('gas', 'N/A')}`
-"
-                        f"**Nonce:** `{details.get('nonce', 'N/A')}`
-"
-                        f"**Input (method):** `{details.get('input', '')[:10]}...`
-"
+                        f"ð **Transaction Info via Etherscan**\n"
+                        f"**Tx Hash:** [`{tx_hash}`](https://etherscan.io/tx/{tx_hash})\n"
+                        f"**From:** `{details.get('from', 'N/A')}`\n"
+                        f"**To:** `{details.get('to', 'N/A')}`\n"
+                        f"**Gas:** `{details.get('gas', 'N/A')}`\n"
+                        f"**Nonce:** `{details.get('nonce', 'N/A')}`\n"
+                        f"**Input (method):** `{details.get('input', '')[:10]}...`\n"
                         "----------------------------"
                     )
                     messages.append(message)
