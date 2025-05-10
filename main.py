@@ -10,106 +10,65 @@ app = FastAPI()
 
 DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
 ETHERSCAN_API_KEY = os.getenv("ETHERSCAN_API_KEY")
-ETHERSCAN_API_URL = os.getenv("ETHERSCAN_API_URL", "https://api.etherscan.io/api")
+ETHERSCAN_URL = "https://api.etherscan.io/api"
 
 logging.basicConfig(level=logging.INFO)
 
-async def fetch_tx_details_from_etherscan(tx_hash):
+async def fetch_tx_details(tx_hash: str) -> dict:
     try:
-        url = f"{ETHERSCAN_API_URL}?module=proxy&action=eth_getTransactionByHash&txhash={tx_hash}&apikey={ETHERSCAN_API_KEY}"
+        url = f"{ETHERSCAN_URL}?module=proxy&action=eth_getTransactionByHash&txhash={tx_hash}&apikey={ETHERSCAN_API_KEY}"
         async with httpx.AsyncClient() as client:
-            response = await client.get(url)
-            data = response.json().get("result", {})
-            return data
+            resp = await client.get(url)
+            return resp.json().get("result", {})
     except Exception as e:
-        logging.error(f"[ERROR] Etherscan API failed: {e}")
+        logging.error(f"[Etherscan] Error fetching tx {tx_hash}: {e}")
         return {}
 
-def format_from_logs(event):
-    block_data = event.get("block", {})
-    block_number = block_data.get("number", "Unknown")
-    logs = block_data.get("logs", [])
-    messages = []
-
-    for log in logs:
-        tx = log.get("transaction", {})
-        tx_hash = tx.get("hash", "Unknown")
-        from_address = tx.get("from", {}).get("address", "Unknown")
-        to_address = tx.get("to", {}).get("address", "Unknown")
-        value_hex = tx.get("value", "0x0")
-        topics = log.get("topics", [])
-        token_transfer = len(topics) > 0 and topics[0].startswith("0xddf252ad")
-
-        try:
-            value_eth = int(value_hex, 16) / 1e18
-        except:
-            value_eth = 0.0
-
-        message = (
-            f"**New Transaction from Logs**
-"
-            f"**Block:** `{block_number}`
-"
-            f"**Tx Hash:** [`{tx_hash}`](https://etherscan.io/tx/{tx_hash})
-"
-            f"**From:** `{from_address}`
-"
-            f"**To:** `{to_address}`
-"
-            f"**Value:** `{value_eth:.6f} ETH}`
-"
-        )
-        if token_transfer:
-            message += "**Type:** Token Transfer
-"
-        message += "----------------------------"
-        messages.append(message)
-    return messages
+def format_log_message(tx: dict) -> str:
+    return (
+        f"**Tx Hash:** [{tx.get('hash')}](https://etherscan.io/tx/{tx.get('hash')})\n"
+        f"**From:** `{tx.get('from')}`\n"
+        f"**To:** `{tx.get('to')}`\n"
+        f"**Value:** `{int(tx.get('value', '0x0'), 16) / 1e18:.6f} ETH`\n"
+        f"**Nonce:** `{tx.get('nonce')}`\n"
+        f"**Gas:** `{tx.get('gas')}`\n"
+        "----------------------------"
+    )
 
 @app.post("/webhook")
 async def webhook_listener(request: Request):
     try:
         payload = await request.json()
-        logging.info(f"Payload received: {json.dumps(payload)[:500]}...")
-        messages = []
+        logging.info(f"Payload received: {json.dumps(payload)[:300]}...")
+
         block = payload.get("block", {})
         logs = block.get("logs", [])
         transactions = block.get("transactions", [])
+        messages = []
 
         if logs:
-            messages = format_from_logs(payload)
+            for log in logs:
+                tx = log.get("transaction", {})
+                msg = format_log_message(tx)
+                messages.append(msg)
         elif transactions:
             for tx in transactions:
                 tx_hash = tx.get("hash")
                 if tx_hash:
-                    details = await fetch_tx_details_from_etherscan(tx_hash)
-                    message = (
-                        f"**New Transaction from Etherscan**
-"
-                        f"**Tx Hash:** [`{tx_hash}`](https://etherscan.io/tx/{tx_hash})
-"
-                        f"**From:** `{details.get("from", "N/A")}`
-"
-                        f"**To:** `{details.get("to", "N/A")}`
-"
-                        f"**Gas:** `{details.get("gas", "N/A")}`
-"
-                        f"**Nonce:** `{details.get("nonce", "N/A")}`
-"
-                        f"**Input:** `{details.get("input", "")[:10]}...`
-"
-                        "----------------------------"
-                    )
-                    messages.append(message)
-        else:
-            messages.append("No logs or transactions found in this block.")
+                    data = await fetch_tx_details(tx_hash)
+                    if data:
+                        msg = format_log_message(data)
+                        messages.append(msg)
+
+        if not messages:
+            messages.append(f"⚠️ No logs in block `{block.get('number', 'Unknown')}`. Full event: `{json.dumps(payload)[:200]}`")
 
         async with httpx.AsyncClient() as client:
             for msg in messages:
                 await client.post(DISCORD_WEBHOOK_URL, json={"content": msg})
 
         return {"status": "ok"}
+
     except Exception as e:
-        logging.error(f"[ERROR] Webhook processing failed: {e}")
-        return {"status": "error", "details": str(e)}
-        
+        logging.error(f"[ERROR] Webhook failed: {e}")
+        return {"status": "error", "detail": str(e)}
