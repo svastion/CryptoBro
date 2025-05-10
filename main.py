@@ -45,7 +45,7 @@ def format_transaction_message(event):
 
             value_eth = int(value_hex, 16) / 1e18
             message = (
-                f"ð¨ **New Transaction**
+                f"🚨 **New Transaction**\n**Hash:** {tx_hash}
 "
                 f"**Block:** `{block_number}`
 "
