@@ -30,9 +30,10 @@ def format_transaction_message(event):
             topics = log.get("topics", [])
             token_transfer = len(topics) > 0 and topics[0].startswith("0xddf252ad")
 
-            value_eth = int(value_hex, 16) / 1e18
-            if value_eth == 0:
-                continue  # исключаем нулевые транзакции
+            try:
+                value_eth = int(value_hex, 16) / 1e18
+            except:
+                value_eth = 0
 
             message = (
                 f"🚨 **New Transaction**\n"
@@ -45,11 +46,11 @@ def format_transaction_message(event):
 
             if token_transfer:
                 message += "**Type:** 🪙 Token Transfer\n"
-            message += "----------------------------"
 
+            message += "----------------------------"
             messages.append(message)
 
-        return messages if messages else ["No transaction logs in this block."]
+        return messages if messages else ["No logs found, but transaction received."]
     except Exception as e:
         logging.error(f"[ERROR] Formatting message failed: {e}")
         return [f"❗ Error parsing transaction."]
