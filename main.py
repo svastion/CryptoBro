@@ -29,8 +29,6 @@ def format_transaction_message(event):
     try:
         block_data = event.get("block", {})
         block_number = block_data.get("number", "Unknown")
-        block_hash = block_data.get("hash", "Unknown")
-        timestamp = block_data.get("timestamp", "Unknown")
         logs = block_data.get("logs", [])
         messages = []
 
@@ -45,11 +43,11 @@ def format_transaction_message(event):
 
             value_eth = int(value_hex, 16) / 1e18
             message = (
-                f"🚨 **New Transaction**\n**Hash:** {tx_hash}`
+                f"ð¨ **New Transaction**
 "
                 f"**Block:** `{block_number}`
 "
-                f"**Tx Hash:** [`{tx_hash}`](https://etherscan.io/tx/{tx_hash})`
+                f"**Tx Hash:** [`{tx_hash}`](https://etherscan.io/tx/{tx_hash})
 "
                 f"**From:** `{from_address}`
 "
@@ -73,7 +71,7 @@ def format_transaction_message(event):
         return messages
     except Exception as e:
         logging.error(f"[ERROR] Formatting message failed: {e}")
-        return [f"â Error parsing transaction."]
+        return ["â Error parsing transaction."]
 
 @app.post("/webhook")
 async def webhook_listener(request: Request):
@@ -94,15 +92,15 @@ async def webhook_listener(request: Request):
 "
                         f"**Tx Hash:** [`{tx_hash}`](https://etherscan.io/tx/{tx_hash})
 "
-                        f"**From:** `{details.get("from", "N/A")}`
+                        f"**From:** `{details.get('from', 'N/A')}`
 "
-                        f"**To:** `{details.get("to", "N/A")}`
+                        f"**To:** `{details.get('to', 'N/A')}`
 "
-                        f"**Gas:** `{details.get("gas", "N/A")}`
+                        f"**Gas:** `{details.get('gas', 'N/A')}`
 "
-                        f"**Nonce:** `{details.get("nonce", "N/A")}`
+                        f"**Nonce:** `{details.get('nonce', 'N/A')}`
 "
-                        f"**Input (method):** `{details.get("input", "")[:10]}...`
+                        f"**Input (method):** `{details.get('input', '')[:10]}...`
 "
                         "----------------------------"
                     )
