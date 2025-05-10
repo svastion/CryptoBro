@@ -45,11 +45,11 @@ def format_transaction_message(event):
 
             value_eth = int(value_hex, 16) / 1e18
             message = (
-                f"🚨 **New Transaction**\n**Hash:** {tx_hash}
+                f"🚨 **New Transaction**\n**Hash:** {tx_hash}`
 "
                 f"**Block:** `{block_number}`
 "
-                f"**Tx Hash:** [`{tx_hash}`](https://etherscan.io/tx/{tx_hash})
+                f"**Tx Hash:** [`{tx_hash}`](https://etherscan.io/tx/{tx_hash})`
 "
                 f"**From:** `{from_address}`
 "
